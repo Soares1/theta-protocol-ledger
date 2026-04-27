@@ -236,7 +236,7 @@ func TestRevertAndPruneStoreView(t *testing.T) {
 		}
 	}
 
-	sv.RevertToSnapshot(root1)
+	sv.RevertToRoot(root1)
 	assert.Equal(value1, sv.GetState(acc1Addr, key1))
 	sv.Prune()
 
@@ -250,7 +250,7 @@ func TestRevertAndPruneStoreView(t *testing.T) {
 		assert.True(has)
 	}
 
-	sv.RevertToSnapshot(root2)
+	sv.RevertToRoot(root2)
 	assert.Equal(value2, sv.GetState(acc1Addr, key1))
 }
 

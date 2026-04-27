@@ -30,6 +30,16 @@ type StoreView struct {
 	refund                      uint64                 // Gas refund during smart contract execution
 	logs                        []*types.Log           // Temporary store of events during smart contract execution
 	balanceChanges              []*types.BalanceChange // Temporary store of balance changes during smart contract execution
+
+	snapshots   []snapshotCheckpoint
+	snapCounter uint64
+}
+
+type snapshotCheckpoint struct {
+	id                uint64
+	root              common.Hash
+	logsLen           int
+	balanceChangesLen int
 }
 
 // NewStoreView creates an instance of the StoreView
@@ -424,6 +434,8 @@ func (sv *StoreView) GetStore() *treestore.TreeStore {
 
 func (sv *StoreView) ResetLogs() {
 	sv.logs = []*types.Log{}
+	sv.snapshots = nil
+	sv.snapCounter = 0
 }
 
 func (sv *StoreView) PopLogs() []*types.Log {
@@ -434,6 +446,8 @@ func (sv *StoreView) PopLogs() []*types.Log {
 
 func (sv *StoreView) ResetBalanceChanges() {
 	sv.balanceChanges = []*types.BalanceChange{}
+	sv.snapshots = nil
+	sv.snapCounter = 0
 }
 
 func (sv *StoreView) PopBalanceChanges() []*types.BalanceChange {
@@ -767,17 +781,41 @@ func (sv *StoreView) Empty(addr common.Address) bool {
 		account.Balance.IsZero()
 }
 
-func (sv *StoreView) RevertToSnapshot(root common.Hash) {
+func (sv *StoreView) RevertToSnapshot(id uint64) {
+	for i := len(sv.snapshots) - 1; i >= 0; i-- {
+		if sv.snapshots[i].id == id {
+			var err error
+			sv.store, err = sv.store.Revert(sv.snapshots[i].root)
+			if err != nil {
+				log.Panic(err)
+			}
+			sv.logs = sv.logs[:sv.snapshots[i].logsLen]
+			sv.balanceChanges = sv.balanceChanges[:sv.snapshots[i].balanceChangesLen]
+			sv.snapshots = sv.snapshots[:i]
+			return
+		}
+	}
+}
+
+// RevertToRoot reverts the treestore to a previously-saved root.
+func (sv *StoreView) RevertToRoot(root common.Hash) {
 	var err error
-	sv.store, err = sv.store.Revert(root) // revert to one of the previous roots
+	sv.store, err = sv.store.Revert(root)
 	if err != nil {
 		log.Panic(err)
 	}
 }
 
-func (sv *StoreView) Snapshot() common.Hash {
+func (sv *StoreView) Snapshot() uint64 {
 	sv.store.Trie.Commit(nil) // Needs to commit to the in-memory trie DB
-	return sv.store.Hash()
+	sv.snapCounter++
+	sv.snapshots = append(sv.snapshots, snapshotCheckpoint{
+		id:                sv.snapCounter,
+		root:              sv.store.Hash(),
+		logsLen:           len(sv.logs),
+		balanceChangesLen: len(sv.balanceChanges),
+	})
+	return sv.snapCounter
 }
 
 func (sv *StoreView) Prune() error {
